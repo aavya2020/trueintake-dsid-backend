@@ -14,8 +14,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Load the regression model data
+# Load regression model data
 df = pd.read_csv("dsid_all_model_data.csv")
+
+# Age group normalization map from frontend labels to backend format
+age_group_map = {
+    "Adult": "Adult",
+    "Children 4+": "4+",
+    "Children 1-4": "1-4"
+}
 
 @app.get("/")
 def read_root():
@@ -23,11 +30,9 @@ def read_root():
 
 @app.post("/predict")
 def predict(nutrient: str, label_claim: float, age_group: str):
-    # Normalize input
     nutrient = nutrient.strip().lower()
-    age_group = age_group.strip()
+    age_group = age_group_map.get(age_group.strip(), age_group.strip())
 
-    # Search for matching row
     row = df[
         (df['Nutrient'].str.strip().str.lower() == nutrient) &
         (df['AgeGroup'].str.strip() == age_group)
