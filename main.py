@@ -1,55 +1,51 @@
-import pandas as pd
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from fastapi.middleware.cors import CORSMiddleware
-
-# Load the combined DSID data
-df = pd.read_excel("DSID4CombinedDataFiles.xlsx", sheet_name="Table 1", engine='openpyxl')
-df.columns = df.columns.str.strip()
-
-# Rename age group to match frontend format
-df["Age Group"] = df["DSID Study Category Description"].apply(
-    lambda x: "Adult" if "Adult" in x else "Children 1–4" if "1 - <4" in x else "Children 4+"
-)
-
-# Nutrient mapping to match frontend names
-df["Nutrient"] = df["DSID Ingredient Name"].str.strip().str.lower()
+import pandas as pd
 
 app = FastAPI()
 
-# Allow CORS for frontend
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Load all data from the Excel sheet 'Table1'
+df = pd.read_excel("DSID4CombinedDataFiles.xlsx", sheet_name="Table1", engine="openpyxl")
+
+# Normalize age group values
+def map_age_group(val):
+    if str(val).strip() == "Adult":
+        return "Adult"
+    elif str(val).strip() == "4":
+        return "Children 4+"
+    elif str(val).strip() == "1-4":
+        return "Children 1-4"
+    else:
+        return str(val).strip()
+
+df["Age Group"] = df["Age Group"].apply(map_age_group)
 
 class PredictionRequest(BaseModel):
-    nutrient: str
+    nutrient_name: str
     label_claim: float
     age_group: str
 
 @app.post("/predict")
-async def predict_nutrient(req: PredictionRequest):
+def predict_nutrient(request: PredictionRequest):
     try:
-        match = df[
-            (df["Nutrient"].str.lower() == req.nutrient.strip().lower()) &
-            (df["Age Group"] == req.age_group.strip())
-        ]
+        nutrient = request.nutrient_name.strip()
+        age_group = request.age_group.strip()
+
+        match = df[(df["Nutrient Name"].str.lower() == nutrient.lower()) & 
+                   (df["Age Group"] == age_group)]
 
         if match.empty:
-            raise HTTPException(status_code=404, detail="Nutrient or age group not found")
+            raise HTTPException(status_code=404, detail="No matching record found.")
 
-        slope = match.iloc[0]["Predicted % Difference from Label for Predicted Mean"]
-        predicted = req.label_claim * (1 + slope / 100)
+        intercept = match["Intercept"].values[0]
+        slope = match["Slope"].values[0]
+        predicted = intercept + slope * request.label_claim
 
         return {
-            "nutrient": req.nutrient,
-            "label_claim": req.label_claim,
-            "age_group": req.age_group,
-            "predicted_measured_amount": round(predicted, 2)
+            "predicted_actual_content": round(predicted, 2),
+            "unit": match["Unit"].values[0],
+            "slope": round(slope, 4),
+            "intercept": round(intercept, 4)
         }
 
     except Exception as e:
