@@ -5,7 +5,7 @@ import pandas as pd
 app = FastAPI()
 
 # Load Excel sheet Table1
-df = pd.read_excel("DSID4CombinedDataFiles.xlsx", sheet_name="Table1", engine="openpyxl")
+df = pd.read_excel("DSID4CombinedDataFiles.xlsx", sheet_name="Table1", engine="openpyxl", header=2)
 df.columns = df.columns.str.strip()  # clean up spaces
 
 # Infer age group based on description
