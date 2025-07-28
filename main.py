@@ -4,21 +4,23 @@ import pandas as pd
 
 app = FastAPI()
 
-# Load all data from the Excel sheet 'Table1'
+# Load Excel sheet Table1
 df = pd.read_excel("DSID4CombinedDataFiles.xlsx", sheet_name="Table1", engine="openpyxl")
+df.columns = df.columns.str.strip()  # clean up spaces
 
-# Normalize age group values
-def map_age_group(val):
-    if str(val).strip() == "Adult":
-        return "Adult"
-    elif str(val).strip() == "4":
-        return "Children 4+"
-    elif str(val).strip() == "1-4":
+# Infer age group based on description
+def map_age_group(desc):
+    desc = str(desc)
+    if "1 - <4" in desc:
         return "Children 1-4"
-    else:
-        return str(val).strip()
+    elif "4 years and older" in desc or "4+" in desc:
+        return "Children 4+"
+    elif "Adult" in desc:
+        return "Adult"
+    return "Unknown"
 
-df["Age Group"] = df["Age Group"].apply(map_age_group)
+df["Age Group"] = df["DSID Study Category Description"].apply(map_age_group)
+df["Nutrient Name"] = df["DSID Ingredient Name"].str.strip().str.lower()
 
 class PredictionRequest(BaseModel):
     nutrient_name: str
@@ -28,24 +30,25 @@ class PredictionRequest(BaseModel):
 @app.post("/predict")
 def predict_nutrient(request: PredictionRequest):
     try:
-        nutrient = request.nutrient_name.strip()
+        nutrient = request.nutrient_name.strip().lower()
         age_group = request.age_group.strip()
 
-        match = df[(df["Nutrient Name"].str.lower() == nutrient.lower()) & 
-                   (df["Age Group"] == age_group)]
+        match = df[
+            (df["Nutrient Name"] == nutrient) &
+            (df["Age Group"] == age_group)
+        ]
 
         if match.empty:
             raise HTTPException(status_code=404, detail="No matching record found.")
 
-        intercept = match["Intercept"].values[0]
-        slope = match["Slope"].values[0]
-        predicted = intercept + slope * request.label_claim
+        slope = match["Predicted % Difference from Label for Predicted Mean"].values[0]
+        predicted = request.label_claim * (1 + slope / 100)
 
         return {
-            "predicted_actual_content": round(predicted, 2),
-            "unit": match["Unit"].values[0],
-            "slope": round(slope, 4),
-            "intercept": round(intercept, 4)
+            "nutrient": request.nutrient_name,
+            "label_claim": request.label_claim,
+            "predicted_measured_amount": round(predicted, 2),
+            "slope_percent": round(slope, 2)
         }
 
     except Exception as e:
